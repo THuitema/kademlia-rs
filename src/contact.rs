@@ -1,4 +1,5 @@
 use std::net::Ipv4Addr;
+use crate::id::Id;
 
 // Represents another node stored inside the k-buckets
 pub struct Contact {

@@ -1,3 +1,4 @@
+use crate::contact::Contact;
 
 // Entry within the routing table
 // Stores up to K contacts, sorted by time last seen (least recently seen at head)

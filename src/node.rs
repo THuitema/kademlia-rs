@@ -1,4 +1,5 @@
-use id::Id;
+use crate::id::Id;
+use crate::routing::RoutingTable;
 
 struct KademliaNode {
     pub id: Id,

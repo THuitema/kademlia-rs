@@ -1,6 +1,6 @@
-use rand::RngCore;
+use rand::Rng;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 // 160-bit ID for nodes and keys stored in the DHT
 pub struct Id {
     pub id: [u8; 20],
@@ -28,9 +28,9 @@ impl Id {
 
     // generate random
     pub fn generate_id() -> Self {
-        let mut id = [0u8; 20];
-        rand::rng().fill_bytes(&mut id);
-        Self { id }
+        Self {
+            id: rand::thread_rng().gen()
+        }
     }
 }
 
