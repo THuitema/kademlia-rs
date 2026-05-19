@@ -1,5 +1,5 @@
 use crate::contact::Contact;
-
+use crate::id::Id;
 // Entry within the routing table
 // Stores up to K contacts, sorted by time last seen (least recently seen at head)
 // Similar to an LRU cache
@@ -8,7 +8,55 @@ pub struct KBucket {
 }
 
 // Stores 160 KBuckets
-// Index i stores contacts with IDs that have 2^i and 2^{i+1} distance from this node
+// Index i stores contacts with IDs that have 2^i and 2^{i+1} distance from the node_id
 pub struct RoutingTable {
     pub buckets: [KBucket; 160],
+    pub node_id: Id,
+    pub k: usize, 
+}
+
+impl KBucket {
+    pub fn new() -> Self {
+        KBucket { contacts: Vec::new() }
+    }
+}
+
+impl RoutingTable {
+    pub fn new(id: Id, k: usize) -> Self {
+        RoutingTable { 
+            buckets: std::array::from_fn(|_| KBucket::new()),
+            node_id: id,
+            k
+        }
+    }
+
+    // Returns bucket index of target_id by taking XOR with node id and counting leading zeros
+    pub fn get_bucket_index(&self, target_id: Id) -> usize {
+        let dist = self.node_id.distance(target_id);
+        dist.leading_zeros() as usize
+    }
+
+    // Adds contact to the corresponding bucket index, if it isn't full
+    pub fn add_contact(&mut self, contact: Contact) -> Result<(), &'static str> {
+        let index = self.get_bucket_index(contact.id);
+        let bucket = &mut self.buckets[index];
+
+        // If contact already in bucket, move it to the tail
+        if let Some(pos) = bucket.contacts.iter().position(|c| c.id == contact.id) {
+            bucket.contacts.remove(pos);
+            bucket.contacts.push(contact);
+            return Ok(());
+        }
+
+        // Add if bucket not full
+        if bucket.contacts.len() < self.k {
+            bucket.contacts.push(contact);
+            return Ok(());
+        }
+
+        // TODO: ping least recently seen contact at head
+        // if time out, evict and insert new contact at tail
+        // if responds, move it to the tail and drop this contact
+        Err("bucket full!")
+    }
 }

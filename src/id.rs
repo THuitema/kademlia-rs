@@ -8,7 +8,7 @@ pub struct Id {
 
 impl Id {
     // distance, bitwise XOR between two IDs
-    pub fn distance(&self, other: &Id) -> Id {
+    pub fn distance(&self, other: Id) -> Id {
         let mut result = [0u8; 20];
         for i in 0..20 {
             result[i] = self.id[i] ^ other.id[i];
