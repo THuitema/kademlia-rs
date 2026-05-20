@@ -1,6 +1,7 @@
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 // 160-bit ID for nodes and keys stored in the DHT
 pub struct Id {
     pub id: [u8; 20],
