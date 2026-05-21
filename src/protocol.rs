@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use crate::id::Id;
 use crate::contact::Contact;
-use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Packet {
