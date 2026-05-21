@@ -1,13 +1,14 @@
-use std::net::{UdpSocket, SocketAddr}; 
+use std::net::{UdpSocket, SocketAddr};
 use serde_cbor::from_slice;
 use crate::id::Id;
 use crate::routing::RoutingTable;
 use crate::protocol::{Packet};
+use crate::rpc::{send_ping, handle_ping};
 
-const MAX_PACKET_SIZE: usize = 1024;
+const MAX_PACKET_SIZE: usize = 1200;
 const K_DEFAULT: usize = 20;
 
-struct KademliaNode {
+pub struct KademliaNode {
     pub id: Id,
     pub routing_table: RoutingTable,
     pub k: usize,
@@ -15,8 +16,9 @@ struct KademliaNode {
 }
 
 impl KademliaNode {
-    // Creates new KademliaNode with given id if Some, generates random id if None
-    // Returns Err if couldn't bind socket to node_addr
+    // If id is None, random one is generated
+    // if k is None, default value is used (20)
+    // Returns Err if can't bind socket to node_addr
     pub fn new(node_addr: SocketAddr, id: Option<Id>, k: Option<usize>) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(node_addr)?;
         let id = id.unwrap_or_else(Id::generate_id);
@@ -54,6 +56,7 @@ impl KademliaNode {
             match packet {
                 Packet::PingRequest(req) => {
                     println!("[listen] ping request received!");
+                    handle_ping(&self.socket, src_addr, req, self.id).unwrap();
                 },
                 Packet::PingResponse(res) => {
                     println!("[listen] ping response received!");

@@ -1,8 +1,9 @@
 use std::net::{UdpSocket, SocketAddr};
 use serde_cbor::to_vec;
-use crate::{node, protocol::*};
+use crate::protocol::*;
 use crate::id::Id;
 
+#[derive(Debug)]
 pub enum PacketError {
     Serialize(String),
     Network(std::io::Error),

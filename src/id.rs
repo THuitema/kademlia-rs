@@ -1,5 +1,6 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 // 160-bit ID for nodes and keys stored in the DHT
@@ -38,5 +39,15 @@ impl Id {
 impl PartialEq for Id {
     fn eq(&self, other: &Id) -> bool {
         self.id == other.id
+    }
+}
+
+impl fmt::Display for Id {
+    // print hexadecimal representation of id
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in &self.id {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
     }
 }
