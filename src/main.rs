@@ -24,7 +24,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let node = match KademliaNode::new(args.addr, None, None) {
+    let mut node = match KademliaNode::new(args.addr, None, None) {
         Ok(n) => n,
         Err(e) => {
             eprintln!("[main] failed to create node: {e}");

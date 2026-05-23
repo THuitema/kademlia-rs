@@ -102,3 +102,21 @@ pub enum FindValueResult {
     Value(Vec<u8>)
 }
 
+impl Packet {
+    // returns packet header
+    pub fn header(&self) -> &Header {
+        match self {
+            Packet::PingRequest(p) => &p.header,
+            Packet::PingResponse(p) => &p.header,
+            Packet::StoreRequest(p) => &p.header,
+            Packet::StoreResponse(p) => &p.header,
+            Packet::KeyExistsRequest(p) => &p.header,
+            Packet::KeyExistsResponse(p) => &p.header,
+            Packet::FindNodeRequest(p) => &p.header,
+            Packet::FindNodeResponse(p) => &p.header,
+            Packet::FindValueRequest(p) => &p.header,
+            Packet::FindValueResponse(p) => &p.header,
+        }
+    }
+}
+

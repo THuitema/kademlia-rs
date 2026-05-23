@@ -1,5 +1,11 @@
 use crate::contact::Contact;
 use crate::id::Id;
+
+pub enum AddContactResult {
+    Added,
+    Updated,
+    PingRequired(Contact),
+}
 // Entry within the routing table
 // Stores up to K contacts, sorted by time last seen (least recently seen at head)
 // Similar to an LRU cache
@@ -37,7 +43,7 @@ impl RoutingTable {
     }
 
     // Adds contact to the corresponding bucket index, if it isn't full
-    pub fn add_contact(&mut self, contact: Contact) -> Result<(), &'static str> {
+    pub fn add_contact(&mut self, contact: Contact) -> AddContactResult {
         let index = self.get_bucket_index(contact.id);
         let bucket = &mut self.buckets[index];
 
@@ -45,18 +51,43 @@ impl RoutingTable {
         if let Some(pos) = bucket.contacts.iter().position(|c| c.id == contact.id) {
             bucket.contacts.remove(pos);
             bucket.contacts.push(contact);
-            return Ok(());
+            return AddContactResult::Updated;
         }
 
         // Add if bucket not full
         if bucket.contacts.len() < self.k {
             bucket.contacts.push(contact);
-            return Ok(());
+            return AddContactResult::Added
         }
 
-        // TODO: ping least recently seen contact at head
+        // notify caller to ping the least recently seen contact in bucket
         // if time out, evict and insert new contact at tail
         // if responds, move it to the tail and drop this contact
-        Err("bucket full!")
+        let least_recently_seen = bucket.contacts[0];
+        return AddContactResult::PingRequired(least_recently_seen);
+    }
+
+    // Removes contact at head of bucket
+    // Contact is some node known to be in the bucket
+    pub fn evict_head(&mut self, contact: Contact) {
+        let index = self.get_bucket_index(contact.id);
+        let bucket = &mut self.buckets[index];
+        bucket.contacts.remove(0);
+    }
+
+    // removes contact from bucket, if it exists
+    pub fn evict(&mut self, contact: Contact) {
+        let index = self.get_bucket_index(contact.id);
+        let bucket = &mut self.buckets[index];
+        if let Some(pos) = bucket.contacts.iter().position(|c| c.id == contact.id) {
+            bucket.contacts.remove(pos);
+        }
+    }
+
+    // Adds new contact to tail
+    pub fn add(&mut self, contact: Contact) {
+        let index = self.get_bucket_index(contact.id);
+        let bucket = &mut self.buckets[index];
+        bucket.contacts.push(contact);
     }
 }
