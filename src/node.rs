@@ -127,6 +127,12 @@ impl KademliaNode {
                         }
                     }
                 },
+                Packet::FindNodeRequest(req) => {
+                    // TODO
+                },
+                Packet::FindNodeResponse(res) => {
+                    // TODO
+                }
                 _ => eprintln!("[listen] HANDLING FOR PACKET TYPE NOT IMPLEMENTED!")
             }
         }

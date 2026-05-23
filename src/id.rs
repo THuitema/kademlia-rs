@@ -2,7 +2,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, Hash)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 // 160-bit ID for nodes and keys stored in the DHT
 pub struct Id {
     pub id: [u8; 20],
@@ -33,12 +33,6 @@ impl Id {
         Self {
             id: rand::thread_rng().gen()
         }
-    }
-}
-
-impl PartialEq for Id {
-    fn eq(&self, other: &Id) -> bool {
-        self.id == other.id
     }
 }
 
