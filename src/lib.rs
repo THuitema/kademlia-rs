@@ -4,3 +4,4 @@ pub mod id;
 pub mod routing;
 pub mod contact;
 pub mod protocol;
+pub mod lookup;

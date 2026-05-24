@@ -91,10 +91,10 @@ impl RoutingTable {
         bucket.contacts.push(contact);
     }
 
-    // Returns k-closest contacts to target
-    // If node knows < k contacts, returns all of them
+    // Returns n-closest contacts to target
+    // If node knows < n contacts, returns all of them
     // "closeness" determiend by XOR metric
-    pub fn get_closest_contacts(&self, target: Id) -> Vec<Contact> {
+    pub fn get_closest_contacts(&self, target: Id, n: usize) -> Vec<Contact> {
         let mut contacts: Vec<Contact> = Vec::new();
 
         for bucket in self.buckets.iter() {
@@ -104,7 +104,7 @@ impl RoutingTable {
         }
 
         contacts.sort_by_key(|contact| target.distance(contact.id));
-        contacts.truncate(self.k);
+        contacts.truncate(n);
         contacts
     }
 }

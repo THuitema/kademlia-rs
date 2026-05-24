@@ -50,10 +50,10 @@ pub fn handle_ping(socket: &UdpSocket, src_addr: SocketAddr, request: PingReques
  * Sends FIND_NODE request to target_addr
  * Recipient replies with the k-closest contacts to key that it knows
  */
-pub fn send_find_node(socket: &UdpSocket, target_addr: SocketAddr, node_id: Id, nonce: Id, key: Id) -> Result<(), PacketError> {
+pub fn send_find_node(socket: &UdpSocket, target_addr: SocketAddr, node_id: Id, nonce: Id, target: Id) -> Result<(), PacketError> {
     let request_packet = Packet::FindNodeRequest(FindNodeRequest { 
         header: Header { sender_id: node_id, nonce}, 
-        key 
+        target 
     });
 
     let buffer = to_vec(&request_packet)
@@ -69,11 +69,11 @@ pub fn send_find_node(socket: &UdpSocket, target_addr: SocketAddr, node_id: Id, 
  * Replies to src_addr with k-closest contacts to key provided in request
  */
 pub fn handle_find_node(socket: &UdpSocket, src_addr: SocketAddr, request: FindNodeRequest, node_id: Id, routing_table: &RoutingTable) -> Result<(), PacketError> {
-    let contacts = routing_table.get_closest_contacts(request.key);
+    let contacts = routing_table.get_closest_contacts(request.target, routing_table.k);
     
     let response_packet = Packet::FindNodeResponse(FindNodeResponse { 
         header: Header { sender_id: node_id, nonce: request.header.nonce }, 
-        target_id: request.key, 
+        target_id: request.target, 
         contacts
     });
 

@@ -74,7 +74,7 @@ pub struct StoreResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FindNodeRequest {
     pub header: Header,
-    pub key: Id
+    pub target: Id
 }
 
 #[derive(Serialize, Deserialize, Debug)]
