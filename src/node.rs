@@ -101,7 +101,7 @@ impl KademliaNode {
                     // if they respond, move them to tail
                     // if they timeout, evict them and add this contact
                     let evict_check_nonce = Id::generate_id();
-                    match send_ping(&self.socket, least_recently_seen.addr, self.id, evict_check_nonce) {
+                    match send_ping(self, least_recently_seen.addr, evict_check_nonce) {
                         Ok(()) => {
                             // add to our pending requests map
                             self.pending_requests.insert(evict_check_nonce, PendingRequest::EvictionCheck { candidate: sender_contact, recipient: least_recently_seen, sent_at: Instant::now() });
@@ -119,7 +119,7 @@ impl KademliaNode {
             match packet {
                 Packet::PingRequest(req) => {
                     println!("[listen] ping request received!");
-                    handle_ping(&self.socket, src_addr, req, self.id).unwrap();
+                    handle_ping(self, src_addr, req).unwrap();
                 },
                 Packet::PingResponse(res) => {
                     println!("[listen] ping response received!");
@@ -149,7 +149,7 @@ impl KademliaNode {
                     }
                 },
                 Packet::FindNodeRequest(req) => {
-                    handle_find_node(&self.socket, src_addr, req, self.id, &self.routing_table).unwrap();
+                    handle_find_node(self, src_addr, req).unwrap();
                 },
                 Packet::FindNodeResponse(res) => {
                     // remove pending request
@@ -198,7 +198,7 @@ impl KademliaNode {
         // send FIND_NODE messages to each of the alpha nodes (add PendingRequest::FindNode for each)
         for contact in to_query {
             let nonce = Id::generate_id();
-            send_find_node(&self.socket, contact.addr, self.id, nonce, target).unwrap();
+            send_find_node(self, contact.addr, nonce, target).unwrap();
             self.pending_requests.insert(
                 nonce, 
                 PendingRequest::FindNode { target, recipient: contact, sent_at: Instant::now() }
@@ -215,6 +215,7 @@ impl KademliaNode {
 
     pub fn check_active_lookups(&mut self) {
         let mut remove_lookups: Vec<Id> = Vec::new();
+        let mut to_send: Vec<(Id, Contact, Id)> = Vec::new(); // nonce, Contact, target
 
         for (target, lookup_state) in self.active_lookups.iter_mut() {
             // Check if current round is over
@@ -229,26 +230,29 @@ impl KademliaNode {
                 lookup_state.last_round_at = Instant::now();
                 lookup_state.old_closest_node = lookup_state.closest_node;
 
+                // Get ALPHA closest contacts node has in routing table to target
                 let to_query: Vec<Contact> = lookup_state.shortlist.iter()
                     .filter(|c| !lookup_state.queried.contains(&c.id))
                     .take(ALPHA)
                     .copied()
                     .collect();
 
-                // send FIND_NODE messages to each of the alpha nodes (add PendingRequest::FindNode for each)
                 for contact in to_query {
                     let nonce = Id::generate_id();
-                    send_find_node(&self.socket, contact.addr, self.id, nonce, *target).unwrap();
-                    self.pending_requests.insert(
-                        nonce, 
-                        PendingRequest::FindNode { target: *target, recipient: contact, sent_at: Instant::now() }
-                    );
-
-                    // update NodeLookup state with pending nodes
                     lookup_state.pending.insert(contact.id);
                     lookup_state.queried.insert(contact.id);
+                    to_send.push((nonce, contact, *target));
                 }
             }
+        }
+
+        // send messages
+        for (nonce, recipient, target) in to_send {
+            send_find_node(self, recipient.addr, nonce, target).unwrap();
+            self.pending_requests.insert(
+                nonce,
+                PendingRequest::FindNode { target, recipient, sent_at: Instant::now() }
+            );
         }
 
         for id in remove_lookups {
