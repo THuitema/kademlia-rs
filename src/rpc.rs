@@ -73,7 +73,7 @@ pub fn handle_find_node(node: &KademliaNode, src_addr: SocketAddr, request: Find
     
     let response_packet = Packet::FindNodeResponse(FindNodeResponse { 
         header: Header { sender_id: node.id, nonce: request.header.nonce }, 
-        target_id: request.target, 
+        target: request.target, 
         contacts
     });
 
@@ -112,14 +112,16 @@ pub fn handle_find_value(node: &KademliaNode, src_addr: SocketAddr, request: Fin
     let response_packet = if let Some(value) = node.store.get(&request.target) {
         Packet::FindValueResponse(FindValueResponse {
             header: Header { sender_id: node.id, nonce: request.header.nonce },
-            result: FindValueResult::Value(value.to_vec())
+            target: request.target,
+            result: LookupResult::Value(value.to_vec())
         })
     } else {
         let contacts = node.routing_table.get_closest_contacts(request.target, node.k);
 
         Packet::FindValueResponse(FindValueResponse {
             header: Header { sender_id: node.id, nonce: request.header.nonce },
-            result: FindValueResult::Contacts(contacts)
+            target: request.target,
+            result: LookupResult::Contacts(contacts)
         })
     };
 

@@ -1,15 +1,13 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::net::{UdpSocket, SocketAddr};
-use std::ops::Shl;
 use serde_cbor::from_slice;
 use std::time::{Instant, Duration};
 use crate::id::Id;
 use crate::routing::{AddContactResult, RoutingTable};
-use crate::protocol::{Packet};
-use crate::rpc::{handle_find_node, handle_ping, send_find_node, send_ping};
+use crate::protocol::{Packet, LookupResult};
+use crate::rpc::{handle_find_node, handle_find_value, handle_ping, send_find_node, send_find_value, send_ping};
 use crate::contact::Contact;
-use crate::lookup::{self, NodeLookup};
+use crate::lookup::{LookupType, NodeLookup};
 
 const MAX_PACKET_SIZE: usize = 1200;
 const K_DEFAULT: usize = 20;
@@ -32,6 +30,8 @@ pub enum PendingRequest {
     target is the key we're searching for
      */
     FindNode { target: Id, recipient: Contact, sent_at: Instant },
+
+    FindValue { target: Id, recipient: Contact, sent_at: Instant },
 }
 
 pub struct KademliaNode {
@@ -41,7 +41,8 @@ pub struct KademliaNode {
     pub socket: UdpSocket,
     pub pending_requests: HashMap<Id, PendingRequest>, // key is the nonce
     pub active_lookups: HashMap<Id, NodeLookup>,
-    pub completed_lookups: HashMap<Id, Vec<Contact>>,
+    pub completed_lookups: HashMap<Id, LookupResult>,
+    pub store: HashMap<Id, Vec<u8>>, // the DHT entries this node stores
 }
 
 impl KademliaNode {
@@ -63,6 +64,7 @@ impl KademliaNode {
             pending_requests: HashMap::new(),
             active_lookups: HashMap::new(),
             completed_lookups: HashMap::new(),
+            store: HashMap::new(),
         })
     }
 
@@ -121,7 +123,7 @@ impl KademliaNode {
                     println!("[listen] ping request received!");
                     handle_ping(self, src_addr, req).unwrap();
                 },
-                Packet::PingResponse(res) => {
+                Packet::PingResponse(_) => {
                     println!("[listen] ping response received!");
 
                     // Find corresponding pending request and update peer
@@ -143,19 +145,16 @@ impl KademliaNode {
                             self.routing_table.evict(r);
                             self.routing_table.add(r);
                         }, 
-                        _ => {
-                            eprintln!("[listen] received PingResponse with no matching pending request for nonce");
-                        }
+                        _ => {}
                     }
                 },
                 Packet::FindNodeRequest(req) => {
                     handle_find_node(self, src_addr, req).unwrap();
                 },
                 Packet::FindNodeResponse(res) => {
-                    // remove pending request
                     self.pending_requests.remove(&nonce);
 
-                    if let Some(lookup_state) = self.active_lookups.get_mut(&res.target_id) {
+                    if let Some(lookup_state) = self.active_lookups.get_mut(&res.target) {
                         lookup_state.pending.remove(&sender_id);
 
                         for contact in res.contacts {
@@ -165,7 +164,7 @@ impl KademliaNode {
                             }
 
                             // update closest_node
-                            if contact.id.distance(res.target_id) < lookup_state.closest_node.id.distance(res.target_id) {
+                            if contact.id.distance(res.target) < lookup_state.closest_node.id.distance(res.target) {
                                 lookup_state.closest_node = contact;
                             }
 
@@ -176,8 +175,52 @@ impl KademliaNode {
                         }
 
                         // re-sort and re-truncate shortlist to limit to k elements
-                        lookup_state.shortlist.sort_by_key(|c| c.id.distance(res.target_id));
+                        lookup_state.shortlist.sort_by_key(|c| c.id.distance(res.target));
                         lookup_state.shortlist.truncate(self.k);
+                    }
+                },
+                Packet::FindValueRequest(req) => {
+                    handle_find_value(self, src_addr, req).unwrap();
+                },
+                Packet::FindValueResponse(res) => {
+                    self.pending_requests.remove(&nonce);
+
+                    if let Some(lookup_state) = self.active_lookups.get_mut(&res.target) {
+                        lookup_state.pending.remove(&sender_id);
+
+                        match res.result {
+                            LookupResult::Contacts(contacts) => {
+                                for contact in contacts {
+                                    // if this node is in contact list, remove that entry to avoid circularity
+                                    if contact.id == self.id {
+                                        continue;
+                                    }
+
+                                    // update closest_node
+                                    if contact.id.distance(res.target) < lookup_state.closest_node.id.distance(res.target) {
+                                        lookup_state.closest_node = contact;
+                                    }
+
+                                    // add to shortlist if not there
+                                    if !lookup_state.shortlist.iter().any(|c| c.id == contact.id) {
+                                        lookup_state.shortlist.push(contact);
+                                    }
+                                }
+
+                                // re-sort and re-truncate shortlist to limit to k elements
+                                lookup_state.shortlist.sort_by_key(|c| c.id.distance(res.target));
+                                lookup_state.shortlist.truncate(self.k);
+                            },
+                            LookupResult::Value(value) => {
+                                // terminate lookup
+                                self.completed_lookups.insert(res.target, LookupResult::Value(value));
+                                self.active_lookups.remove(&res.target);
+
+                                // *** TODO ***
+                                // send STORE to closest node which did not return the value
+                                // assuming this would be closest node in shortlist since we didn't add the successful one (this) to the shortlist
+                            }
+                        }
                     }
                 }
                 _ => eprintln!("[listen] HANDLING FOR PACKET TYPE NOT IMPLEMENTED!")
@@ -185,24 +228,45 @@ impl KademliaNode {
         }
     }
 
-    pub fn lookup(&mut self, target: Id) {
+    pub fn lookup_node(&mut self, lookup_type: LookupType, target: Id) {
+        // If FIND_VALUE, see if this node stores the target
+        // If so, we're done -- don't need to send any messages
+        if lookup_type == LookupType::FindValue {
+            if let Some(value) = self.store.get(&target) {
+                self.completed_lookups.insert(target, LookupResult::Value(value.to_vec()));
+                return;
+            }
+        }
+
         // find alpha closest contacts to target
         let closest_contacts = self.routing_table.get_closest_contacts(target, ALPHA);
-        let mut lookup_state = NodeLookup::new(target, closest_contacts);
+        let mut lookup_state = NodeLookup::new(lookup_type, target, closest_contacts);
 
         let to_query: Vec<Contact> = lookup_state.shortlist.iter()
             .take(ALPHA)
             .copied()
             .collect();
 
-        // send FIND_NODE messages to each of the alpha nodes (add PendingRequest::FindNode for each)
+        // send requests to each of the alpha nodes, and mark pending request for each
         for contact in to_query {
-            let nonce = Id::generate_id();
-            send_find_node(self, contact.addr, nonce, target).unwrap();
-            self.pending_requests.insert(
-                nonce, 
-                PendingRequest::FindNode { target, recipient: contact, sent_at: Instant::now() }
-            );
+            let nonce: Id = Id::generate_id();
+
+            match lookup_type {
+                LookupType::FindNode => {
+                    send_find_node(self, contact.addr, nonce, target).unwrap();
+                    self.pending_requests.insert(
+                        nonce, 
+                        PendingRequest::FindNode { target, recipient: contact, sent_at: Instant::now() }
+                    );
+                },
+                LookupType::FindValue => {
+                    send_find_value(self, contact.addr, nonce, target).unwrap();
+                    self.pending_requests.insert(
+                        nonce,
+                        PendingRequest::FindValue { target, recipient: contact, sent_at: Instant::now() }
+                    );
+                }
+            };
 
             // update NodeLookup state with pending nodes
             lookup_state.pending.insert(contact.id);
@@ -215,14 +279,14 @@ impl KademliaNode {
 
     pub fn check_active_lookups(&mut self) {
         let mut remove_lookups: Vec<Id> = Vec::new();
-        let mut to_send: Vec<(Id, Contact, Id)> = Vec::new(); // nonce, Contact, target
+        let mut to_send: Vec<(Id, Contact, Id, LookupType)> = Vec::new(); // nonce, Contact, target, type
 
         for (target, lookup_state) in self.active_lookups.iter_mut() {
             // Check if current round is over
             if lookup_state.last_round_at.elapsed() > LOOKUP_ROUND_PERIOD {
                 // check if termination condition hit
                 if lookup_state.closest_node.id == lookup_state.old_closest_node.id && lookup_state.pending.is_empty() {
-                    self.completed_lookups.insert(*target, lookup_state.shortlist.clone());
+                    self.completed_lookups.insert(*target, LookupResult::Contacts(lookup_state.shortlist.clone()));
                     remove_lookups.push(*target);
                     continue;
                 }
@@ -241,18 +305,29 @@ impl KademliaNode {
                     let nonce = Id::generate_id();
                     lookup_state.pending.insert(contact.id);
                     lookup_state.queried.insert(contact.id);
-                    to_send.push((nonce, contact, *target));
+                    to_send.push((nonce, contact, *target, lookup_state.lookup_type));
                 }
             }
         }
 
         // send messages
-        for (nonce, recipient, target) in to_send {
-            send_find_node(self, recipient.addr, nonce, target).unwrap();
-            self.pending_requests.insert(
-                nonce,
-                PendingRequest::FindNode { target, recipient, sent_at: Instant::now() }
-            );
+        for (nonce, recipient, target, lookup_type) in to_send {
+            match lookup_type {
+                LookupType::FindNode => {
+                    send_find_node(self, recipient.addr, nonce, target).unwrap();
+                    self.pending_requests.insert(
+                        nonce,
+                        PendingRequest::FindNode { target, recipient, sent_at: Instant::now() }
+                    );
+                },
+                LookupType::FindValue => {
+                    send_find_value(self, recipient.addr, nonce, target).unwrap();
+                    self.pending_requests.insert(
+                        nonce,
+                        PendingRequest::FindValue { target, recipient, sent_at: Instant::now() }
+                    );
+                }
+            };
         }
 
         for id in remove_lookups {
@@ -282,7 +357,20 @@ impl KademliaNode {
                     }
                 },
                 PendingRequest::FindNode { target: k, recipient: r, sent_at: t } => {
-                    // if find node times out, evict recipient and remove from lookup shortlist if it's there
+                    // if FIND_NODE times out, evict recipient and remove from lookup shortlist if it's there
+                    if t.elapsed() > REQ_TIMEOUT {
+                        self.routing_table.evict(*r);
+                        if let Some(lookup_state) = self.active_lookups.get_mut(k) {
+                            lookup_state.pending.remove(&r.id);
+                            if let Some(pos) = lookup_state.shortlist.iter().position(|c| c.id == r.id) {
+                                lookup_state.shortlist.remove(pos);
+                            }
+                        }
+                        remove_nonces.push(*req.0);
+                    }
+                },
+                PendingRequest::FindValue { target: k, recipient: r, sent_at: t } => {
+                    // if FIND_VALUE times out, evict recipient and remove from lookup shortlist if it's there
                     if t.elapsed() > REQ_TIMEOUT {
                         self.routing_table.evict(*r);
                         if let Some(lookup_state) = self.active_lookups.get_mut(k) {

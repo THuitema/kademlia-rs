@@ -37,7 +37,7 @@ fn main() {
     if let Some(join_addr) = args.join_addr {
         println!("sending ping!");
         let nonce = Id::generate_id();
-        match send_ping(&node.socket, join_addr, node.id, nonce) {
+        match send_ping(&node, join_addr, nonce) {
             Ok(_) => {},
             Err(_) => eprintln!("[main] send_ping() failed")
         }

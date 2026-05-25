@@ -80,7 +80,7 @@ pub struct FindNodeRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FindNodeResponse {
     pub header: Header,
-    pub target_id: Id,
+    pub target: Id,
     pub contacts: Vec<Contact>
 }
 
@@ -93,11 +93,12 @@ pub struct FindValueRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FindValueResponse {
     pub header: Header,
-    pub result: FindValueResult
+    pub target: Id,
+    pub result: LookupResult
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum FindValueResult {
+pub enum LookupResult {
     Contacts(Vec<Contact>),
     Value(Vec<u8>)
 }
