@@ -87,7 +87,7 @@ pub struct FindNodeResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FindValueRequest {
     pub header: Header,
-    pub key: Id 
+    pub target: Id 
 }
 
 #[derive(Serialize, Deserialize, Debug)]
