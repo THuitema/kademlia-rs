@@ -4,7 +4,7 @@ use serde_cbor::from_slice;
 use std::time::{Instant, Duration};
 use crate::id::Id;
 use crate::routing::{AddContactResult, RoutingTable};
-use crate::protocol::{LookupResult, Packet, StoreStatus};
+use crate::protocol::{LookupResult, MAX_VALUE_SIZE, Packet, StoreStatus};
 use crate::rpc::{handle_find_node, handle_find_value, handle_ping, handle_store, send_find_node, send_find_value, send_ping, send_store};
 use crate::contact::Contact;
 use crate::lookup::{LookupType, NodeLookup};
@@ -46,7 +46,9 @@ pub struct KademliaNode {
     pub pending_requests: HashMap<Id, PendingRequest>, // key is the nonce
     pub active_lookups: HashMap<Id, NodeLookup>,
     pub completed_lookups: HashMap<Id, LookupResult>,
-    pub store: HashMap<Id, Vec<u8>>, // the DHT entries this node stores
+    pub store: HashMap<Id, Vec<u8>>, // the DHT entries this node stores,
+    pub active_stores: HashMap<Id, Vec<u8>>, // stores the key-value pairs node is currently storing across multiple nodes
+    pub completed_stores: HashMap<Id, Vec<Contact>>, // list of contacts that stored the key-value pair
 }
 
 impl KademliaNode {
@@ -77,6 +79,8 @@ impl KademliaNode {
             active_lookups: HashMap::new(),
             completed_lookups: HashMap::new(),
             store: HashMap::new(),
+            active_stores: HashMap::new(),
+            completed_stores: HashMap::new(),
         })
     }
 
@@ -231,11 +235,16 @@ impl KademliaNode {
                         self.active_lookups.remove(&res.target);
                         if let Some(c) = store_contact {
                             let nonce = Id::generate_id();
-                            send_store(self, c.addr, nonce, res.target, value.to_vec()).unwrap();
-                            self.pending_requests.insert(
-                                nonce, 
-                                PendingRequest::Store { recipient: c, sent_at: Instant::now() }
-                            );
+                            match send_store(self, c.addr, nonce, res.target, value.to_vec()) {
+                                Ok(()) => {
+                                    self.pending_requests.insert(
+                                        nonce, 
+                                        PendingRequest::Store { recipient: c, sent_at: Instant::now() }
+                                    );
+                                },
+                                Err(_) => {}
+                            }
+                            
                         }
                     }
                 },
@@ -246,11 +255,32 @@ impl KademliaNode {
                     self.pending_requests.remove(&nonce);
                     match res.status {
                         StoreStatus::Error(e) => eprintln!("[listen] store failed: {e}"),
-                        StoreStatus::Ok => {}
+                        StoreStatus::Ok => {
+                            // Add to list of contacts that successfully stored the value
+                            if let Some(confirmed) = self.completed_stores.get_mut(&res.key) {
+                                confirmed.push(sender_contact);
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Store a key-value pair in the distributed hash table
+     * key-value pair is replicated to the k-closest nodes to to the key
+     * If key is None, it will be the SHA1 hash of the value
+     */
+    pub fn store(&mut self, key: Option<Id>, value: Vec<u8>) {
+        if value.len() > MAX_VALUE_SIZE {
+            eprintln!("[send] value exceeds MAX_VALUE_SIZE");
+            return;
+        }
+        
+        let key = key.unwrap_or_else(|| Id::hash_value(value.clone()));
+        self.active_stores.insert(key, value);
+        self.lookup(LookupType::FindNode, key);
     }
 
     /**
@@ -318,7 +348,9 @@ impl KademliaNode {
      */
     fn check_active_lookups(&mut self) {
         let mut remove_lookups: Vec<Id> = Vec::new();
-        let mut to_send: Vec<(Id, Contact, Id, LookupType)> = Vec::new(); // nonce, Contact, target, type
+
+        let mut lookup_tasks: Vec<(Id, Contact, Id, LookupType)> = Vec::new(); // nonce, Contact, target, type
+        let mut store_tasks: Vec<(Id, Vec<u8>, Vec<Contact>)> = Vec::new(); // key, value, shortlist
 
         for (target, lookup_state) in self.active_lookups.iter_mut() {
             // Check if current round is over
@@ -327,6 +359,13 @@ impl KademliaNode {
                 if lookup_state.closest_node.id == lookup_state.old_closest_node.id && lookup_state.pending.is_empty() {
                     self.completed_lookups.insert(*target, LookupResult::Contacts(lookup_state.shortlist.clone()));
                     remove_lookups.push(*target);
+
+                    // check if this completed lookup is associated with a store
+                    if let Some(value) = self.active_stores.remove(target) {
+                        // since lookup completed, move to next phase of STORE by sending STORE messages to shortlist
+                        self.completed_stores.insert(*target, Vec::new());
+                        store_tasks.push((*target, value, lookup_state.shortlist.clone()));
+                    }
                     continue;
                 }
 
@@ -344,13 +383,13 @@ impl KademliaNode {
                     let nonce = Id::generate_id();
                     lookup_state.pending.insert(contact.id);
                     lookup_state.queried.insert(contact.id);
-                    to_send.push((nonce, contact, *target, lookup_state.lookup_type));
+                    lookup_tasks.push((nonce, contact, *target, lookup_state.lookup_type));
                 }
             }
         }
 
-        // send messages
-        for (nonce, recipient, target, lookup_type) in to_send {
+        // send FIND_* messages
+        for (nonce, recipient, target, lookup_type) in lookup_tasks {
             match lookup_type {
                 LookupType::FindNode => {
                     send_find_node(self, recipient.addr, nonce, target).unwrap();
@@ -367,6 +406,11 @@ impl KademliaNode {
                     );
                 }
             };
+        }
+
+        // send STORE messages to lookups that were part of a STORE
+        for (key, value, contacts) in store_tasks {
+            self.send_stores(contacts, key, value);
         }
 
         for id in remove_lookups {
@@ -437,6 +481,21 @@ impl KademliaNode {
         // loop through and remove timed-out pending requests
         for n in remove_nonces {
             self.pending_requests.remove(&n);
+        }
+    }
+
+    fn send_stores(&mut self, contacts: Vec<Contact>, key: Id, value: Vec<u8>) {
+        for c in contacts {
+            let nonce = Id::generate_id();
+            match send_store(self, c.addr, nonce, key, value.clone()) {
+                Ok(()) => {
+                    self.pending_requests.insert(
+                        nonce, 
+                        PendingRequest::Store { recipient: c, sent_at: Instant::now() }
+                    );
+                },
+                Err(e) => eprintln!("[send_stores] failed to send STORE to {}: {:?}", c.addr, e)
+            }
         }
     }
 }

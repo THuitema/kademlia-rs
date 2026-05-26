@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use serde_cbor::to_vec;
+use std::fmt;
 use crate::node::KademliaNode;
 use crate::protocol::*;
 use crate::id::Id;
@@ -9,6 +10,16 @@ pub enum PacketError {
     Serialize(String),
     Network(std::io::Error),
     PacketTooLarge
+}
+
+impl fmt::Display for PacketError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PacketError::Serialize(s) => write!(f, "Serialization Error ({:?})", s),
+            PacketError::Network(e) => write!(f, "Network Error ({:?})", e),
+            PacketError::PacketTooLarge => write!(f, "Packet Too Large")
+        }
+    }
 }
 
 /**
