@@ -1,6 +1,7 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use sha1::{Digest, Sha1};
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 // 160-bit ID for nodes and keys stored in the DHT
@@ -32,6 +33,16 @@ impl Id {
     pub fn generate_id() -> Self {
         Self {
             id: rand::thread_rng().gen()
+        }
+    }
+
+    // calculates SHA1 hash of value
+    pub fn hash_value(value: Vec<u8>) -> Self {
+        let mut hasher = Sha1::new();
+        hasher.update(value);
+        let hash = hasher.finalize();
+        Self {
+            id: hash.into()
         }
     }
 }
