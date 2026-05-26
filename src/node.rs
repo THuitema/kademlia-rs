@@ -15,7 +15,10 @@ const RECV_TIMEOUT: Duration = Duration::from_secs(1); // so recv in listen loop
 const REQ_TIMEOUT: Duration = Duration::from_secs(10); // timeout on pending requests
 const ALPHA: usize = 3;
 const LOOKUP_ROUND_PERIOD: Duration = Duration::from_millis(500);
- 
+
+/**
+ * Used to keep track of sent requests that the node is expecting a response for
+ */
 pub enum PendingRequest {
     Ping { recipient: Contact, sent_at: Instant },
 
@@ -47,9 +50,17 @@ pub struct KademliaNode {
 }
 
 impl KademliaNode {
-    // If id is None, random one is generated
-    // if k is None, default value is used (20)
-    // Returns Err if can't bind socket to node_addr
+    
+    // *********
+    // User-facing API
+    // *********
+
+    /**
+     * Initializes a new node, including its UDP socket
+     * If id is None, random one is generated
+     * If k is None, default value is used (20)
+     * Returns Err if system can't bind socket to node_addr
+     */
     pub fn new(node_addr: SocketAddr, id: Option<Id>, k: Option<usize>) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(node_addr)?;
         socket.set_read_timeout(Some(RECV_TIMEOUT))?;
@@ -69,6 +80,10 @@ impl KademliaNode {
         })
     }
 
+    /**
+     * Main loop for handling incoming messages and sending responses
+     * Should be called after KademliaNode::new()
+     */
     pub fn listen(&mut self) {
         loop {
             self.check_pending_requests();
@@ -238,6 +253,12 @@ impl KademliaNode {
         }
     }
 
+    /**
+     * Lookup a key in the distributed hash table
+     * FindNode: returns list of k-closest contacts to target
+     * FindValue: returns value of target if a node stores it, otherwise returns k-closest contacts to target
+     * Result of lookup is stored in self.completed_lookups once completed
+     */
     pub fn lookup(&mut self, lookup_type: LookupType, target: Id) {
         // If FIND_VALUE, see if this node stores the target
         // If so, we're done -- don't need to send any messages
@@ -287,7 +308,15 @@ impl KademliaNode {
         self.active_lookups.insert(target, lookup_state);
     }
 
-    pub fn check_active_lookups(&mut self) {
+    // *********
+    // PRIVATE HELPER METHODS
+    // *********
+
+    /**
+     * Handles sending FIND_* messages for active lookups and checking if lookups are complete
+     * Utilizes loose parallelism: iterate periodically (500 ms), so that the number of messages in flight is some low multiple of alpha
+     */
+    fn check_active_lookups(&mut self) {
         let mut remove_lookups: Vec<Id> = Vec::new();
         let mut to_send: Vec<(Id, Contact, Id, LookupType)> = Vec::new(); // nonce, Contact, target, type
 
@@ -345,8 +374,11 @@ impl KademliaNode {
         }
     }
 
-    // loop through all pending requests and handle timeouts
-    pub fn check_pending_requests(&mut self) {
+    /**
+     * Loop through all pending requests and handle timeouts
+     * For all request types, a timeout on the response requires node to evict the recipient from its routing table
+     */
+    fn check_pending_requests(&mut self) {
         let mut remove_nonces: Vec<Id> = Vec::new();
 
         for req in self.pending_requests.iter() {
