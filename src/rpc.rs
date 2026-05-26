@@ -11,10 +11,10 @@ pub enum PacketError {
 }
 
 /**
- * Sends a ping message to target_addr
+ * Sends a ping message to dest_addr
  * Caller is responsible for generating and storing the nonce
  */
-pub fn send_ping(node: &KademliaNode, target_addr: SocketAddr, nonce: Id) -> Result<(), PacketError> {
+pub fn send_ping(node: &KademliaNode, dest_addr: SocketAddr, nonce: Id) -> Result<(), PacketError> {
     let request_packet = Packet::PingRequest(PingRequest { 
         header: Header { sender_id: node.id, nonce } 
     });
@@ -22,7 +22,7 @@ pub fn send_ping(node: &KademliaNode, target_addr: SocketAddr, nonce: Id) -> Res
     let buffer = to_vec(&request_packet)
         .map_err(|e| PacketError::Serialize(e.to_string()))?;
 
-    node.socket.send_to(&buffer, target_addr)
+    node.socket.send_to(&buffer, dest_addr)
         .map_err(PacketError::Network)?;
 
     Ok(())
@@ -47,10 +47,10 @@ pub fn handle_ping(node: &KademliaNode, src_addr: SocketAddr, request: PingReque
 }
 
 /**
- * Sends FIND_NODE request to target_addr
+ * Sends FIND_NODE request to dest_addr
  * Recipient replies with the k-closest contacts to key that it knows
  */
-pub fn send_find_node(node: &KademliaNode, target_addr: SocketAddr, nonce: Id, target: Id) -> Result<(), PacketError> {
+pub fn send_find_node(node: &KademliaNode, dest_addr: SocketAddr, nonce: Id, target: Id) -> Result<(), PacketError> {
     let request_packet = Packet::FindNodeRequest(FindNodeRequest { 
         header: Header { sender_id: node.id, nonce}, 
         target 
@@ -59,7 +59,7 @@ pub fn send_find_node(node: &KademliaNode, target_addr: SocketAddr, nonce: Id, t
     let buffer = to_vec(&request_packet)
         .map_err(|e| PacketError::Serialize(e.to_string()))?;
 
-    node.socket.send_to(&buffer, target_addr)
+    node.socket.send_to(&buffer, dest_addr)
         .map_err(PacketError::Network)?;
     
     Ok(())
@@ -87,9 +87,9 @@ pub fn handle_find_node(node: &KademliaNode, src_addr: SocketAddr, request: Find
 }
 
 /**
- * Sends FIND_VALUE request to target_addr
+ * Sends FIND_VALUE request to dest_addr
  */
-pub fn send_find_value(node: &KademliaNode, target_addr: SocketAddr, nonce: Id, target: Id) -> Result<(), PacketError> {
+pub fn send_find_value(node: &KademliaNode, dest_addr: SocketAddr, nonce: Id, target: Id) -> Result<(), PacketError> {
     let request_packet = Packet::FindValueRequest(FindValueRequest { 
         header: Header { sender_id: node.id, nonce}, 
         target 
@@ -97,10 +97,9 @@ pub fn send_find_value(node: &KademliaNode, target_addr: SocketAddr, nonce: Id, 
 
     let buffer = to_vec(&request_packet)
         .map_err(|e| PacketError::Serialize(e.to_string()))?;
-    //hey
-    node.socket.send_to(&buffer, target_addr)
+
+        node.socket.send_to(&buffer, dest_addr)
         .map_err(PacketError::Network)?;
-    //hey
     Ok(())
 }
 
