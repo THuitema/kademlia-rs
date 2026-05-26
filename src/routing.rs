@@ -43,6 +43,7 @@ impl RoutingTable {
     }
 
     // Adds contact to the corresponding bucket index, if it isn't full
+    // If contact already in bucket, moves it to tail
     pub fn add_contact(&mut self, contact: Contact) -> AddContactResult {
         let index = self.get_bucket_index(contact.id);
         let bucket = &mut self.buckets[index];

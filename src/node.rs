@@ -121,32 +121,14 @@ impl KademliaNode {
 
             match packet {
                 Packet::PingRequest(req) => {
-                    println!("[listen] ping request received!");
+                    println!("[listen] PingRequest received!");
                     handle_ping(self, src_addr, req).unwrap();
                 },
                 Packet::PingResponse(_) => {
-                    println!("[listen] ping response received!");
-
-                    // Find corresponding pending request and update peer
+                    println!("[listen] PingResponse received!");
                     let pending_req = self.pending_requests.remove(&nonce);
-                    match pending_req {
-                        Some(PendingRequest::Ping { recipient: r, .. }) => {
-                            if r.id != sender_id {
-                                eprintln!("[listen] PingResponse sender ID mismatch");
-                                return;
-                            }
-                            self.routing_table.evict(r);
-                            self.routing_table.add(r);
-                        },
-                        Some(PendingRequest::EvictionCheck { recipient: r, .. }) => {
-                            if r.id != sender_id {
-                                eprintln!("[listen] PingResponse sender ID mismatch");
-                                return;
-                            }
-                            self.routing_table.evict(r);
-                            self.routing_table.add(r);
-                        }, 
-                        _ => {}
+                    if pending_req.is_none() {
+                        eprintln!("[listen] received PingResponse with no matching pending request");
                     }
                 },
                 Packet::FindNodeRequest(req) => {
