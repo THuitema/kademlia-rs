@@ -8,6 +8,7 @@ use crate::id::Id;
 pub enum PacketError {
     Serialize(String),
     Network(std::io::Error),
+    PacketTooLarge
 }
 
 /**
@@ -129,6 +130,55 @@ pub fn handle_find_value(node: &KademliaNode, src_addr: SocketAddr, request: Fin
 
     node.socket.send_to(&buffer, src_addr)
         .map_err(PacketError::Network)?;
-    // hey
+
+    Ok(())
+}
+
+
+/**
+ * Sends request to dest_addr to store key-value pair
+ * No guarantee that it will be stored, node must look at the status contained in the response
+ */
+pub fn send_store(node: &KademliaNode, dest_addr: SocketAddr, nonce: Id, key: Id, value: Vec<u8>) -> Result<(), PacketError> {
+    // limiting value size to avoid packet fragmentation
+    if value.len() > MAX_VALUE_SIZE {
+        return Err(PacketError::PacketTooLarge);
+    }
+    
+    let request_packet = Packet::StoreRequest(StoreRequest { 
+        header: Header { sender_id: node.id, nonce}, 
+        key,
+        value 
+    });
+
+    let buffer = to_vec(&request_packet)
+        .map_err(|e| PacketError::Serialize(e.to_string()))?;
+
+        node.socket.send_to(&buffer, dest_addr)
+        .map_err(PacketError::Network)?;
+    
+    Ok(())
+}
+
+/**
+ * Attempt to store key-value pair and reply with status of it was successfully stored or not
+ * If node is already storing key, it overwrite the old value with new one contained in request
+ */
+pub fn handle_store(node: &mut KademliaNode, src_addr: SocketAddr, request: StoreRequest) -> Result<(), PacketError> {
+    // insert or overwrite key-value pair
+    node.store.insert(request.key, request.value);
+
+    let response_packet = Packet::StoreResponse(StoreResponse { 
+        header: Header { sender_id: node.id, nonce: request.header.nonce}, 
+        key: request.key,
+        status: StoreStatus::Ok 
+    });
+
+    let buffer = to_vec(&response_packet)
+        .map_err(|e| PacketError::Serialize(e.to_string()))?;
+
+    node.socket.send_to(&buffer, src_addr)
+        .map_err(PacketError::Network)?;
+
     Ok(())
 }

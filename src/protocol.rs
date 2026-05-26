@@ -2,13 +2,12 @@ use serde::{Deserialize, Serialize};
 use crate::id::Id;
 use crate::contact::Contact;
 
+pub const MAX_VALUE_SIZE: usize = 1000; // max number of bytes
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Packet {
     PingRequest(PingRequest),
     PingResponse(PingResponse),
-
-    KeyExistsRequest(KeyExistsRequest),
-    KeyExistsResponse(KeyExistsResponse),
 
     StoreRequest(StoreRequest),
     StoreResponse(StoreResponse),
@@ -37,18 +36,6 @@ pub struct PingResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct KeyExistsRequest {
-    pub header: Header,
-    pub key: Id
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct KeyExistsResponse {
-    pub header: Header,
-    pub has_value: bool
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct StoreRequest {
     pub header: Header,
     pub key: Id,
@@ -58,9 +45,6 @@ pub struct StoreRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum StoreStatus {
     Ok,
-    AlreadyExists,
-    BucketFull,
-    InsufficientStorage,
     Error(String)
 }
 
@@ -111,8 +95,6 @@ impl Packet {
             Packet::PingResponse(p) => &p.header,
             Packet::StoreRequest(p) => &p.header,
             Packet::StoreResponse(p) => &p.header,
-            Packet::KeyExistsRequest(p) => &p.header,
-            Packet::KeyExistsResponse(p) => &p.header,
             Packet::FindNodeRequest(p) => &p.header,
             Packet::FindNodeResponse(p) => &p.header,
             Packet::FindValueRequest(p) => &p.header,
