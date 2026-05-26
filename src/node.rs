@@ -238,7 +238,7 @@ impl KademliaNode {
         }
     }
 
-    pub fn lookup_node(&mut self, lookup_type: LookupType, target: Id) {
+    pub fn lookup(&mut self, lookup_type: LookupType, target: Id) {
         // If FIND_VALUE, see if this node stores the target
         // If so, we're done -- don't need to send any messages
         if lookup_type == LookupType::FindValue {
