@@ -81,7 +81,7 @@ pub struct FindValueResponse {
     pub result: LookupResult
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum LookupResult {
     Contacts(Vec<Contact>),
     Value(Vec<u8>)

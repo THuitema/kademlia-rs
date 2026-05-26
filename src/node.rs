@@ -4,8 +4,8 @@ use serde_cbor::from_slice;
 use std::time::{Instant, Duration};
 use crate::id::Id;
 use crate::routing::{AddContactResult, RoutingTable};
-use crate::protocol::{Packet, LookupResult};
-use crate::rpc::{handle_find_node, handle_find_value, handle_ping, send_find_node, send_find_value, send_ping};
+use crate::protocol::{LookupResult, Packet, StoreStatus};
+use crate::rpc::{handle_find_node, handle_find_value, handle_ping, handle_store, send_find_node, send_find_value, send_ping, send_store};
 use crate::contact::Contact;
 use crate::lookup::{LookupType, NodeLookup};
 
@@ -30,8 +30,9 @@ pub enum PendingRequest {
     target is the key we're searching for
      */
     FindNode { target: Id, recipient: Contact, sent_at: Instant },
-
     FindValue { target: Id, recipient: Contact, sent_at: Instant },
+
+    Store { recipient: Contact, sent_at: Instant },
 }
 
 pub struct KademliaNode {
@@ -185,11 +186,20 @@ impl KademliaNode {
                 Packet::FindValueResponse(res) => {
                     self.pending_requests.remove(&nonce);
 
+                    let result = res.result.clone();
+                    let mut store_contact: Option<Contact> = None;
+
                     if let Some(lookup_state) = self.active_lookups.get_mut(&res.target) {
                         lookup_state.pending.remove(&sender_id);
 
-                        match res.result {
+                        match &result {
                             LookupResult::Contacts(contacts) => {
+                                // check if this is the closest node that didn't return value
+                                if lookup_state.closest_without_value.is_none() || 
+                                    sender_contact.id.distance(res.target) < lookup_state.closest_without_value.unwrap().id.distance(res.target) {
+                                        lookup_state.closest_without_value = Some(sender_contact);
+                                    }
+
                                 for contact in contacts {
                                     // if this node is in contact list, remove that entry to avoid circularity
                                     if contact.id == self.id {
@@ -198,12 +208,12 @@ impl KademliaNode {
 
                                     // update closest_node
                                     if contact.id.distance(res.target) < lookup_state.closest_node.id.distance(res.target) {
-                                        lookup_state.closest_node = contact;
+                                        lookup_state.closest_node = *contact;
                                     }
 
                                     // add to shortlist if not there
                                     if !lookup_state.shortlist.iter().any(|c| c.id == contact.id) {
-                                        lookup_state.shortlist.push(contact);
+                                        lookup_state.shortlist.push(*contact);
                                     }
                                 }
 
@@ -213,17 +223,35 @@ impl KademliaNode {
                             },
                             LookupResult::Value(value) => {
                                 // terminate lookup
-                                self.completed_lookups.insert(res.target, LookupResult::Value(value));
-                                self.active_lookups.remove(&res.target);
-
-                                // *** TODO ***
-                                // send STORE to closest node which did not return the value
-                                // assuming this would be closest node in shortlist since we didn't add the successful one (this) to the shortlist
+                                self.completed_lookups.insert(res.target, LookupResult::Value(value.to_vec()));
+                                store_contact = lookup_state.closest_without_value;
                             }
                         }
                     }
+
+                    // If we terminated, send STORE to closest node that didn't return value
+                    if let LookupResult::Value(value) = &result {
+                        self.active_lookups.remove(&res.target);
+                        if let Some(c) = store_contact {
+                            let nonce = Id::generate_id();
+                            send_store(self, c.addr, nonce, res.target, value.to_vec()).unwrap();
+                            self.pending_requests.insert(
+                                nonce, 
+                                PendingRequest::Store { recipient: c, sent_at: Instant::now() }
+                            );
+                        }
+                    }
+                },
+                Packet::StoreRequest(req) => {
+                    handle_store(self, src_addr, req).unwrap();
+                },
+                Packet::StoreResponse(res) => {
+                    self.pending_requests.remove(&nonce);
+                    match res.status {
+                        StoreStatus::Error(e) => eprintln!("[listen] store failed: {e}"),
+                        StoreStatus::Ok => {}
+                    }
                 }
-                _ => eprintln!("[listen] HANDLING FOR PACKET TYPE NOT IMPLEMENTED!")
             }
         }
     }
@@ -379,6 +407,13 @@ impl KademliaNode {
                                 lookup_state.shortlist.remove(pos);
                             }
                         }
+                        remove_nonces.push(*req.0);
+                    }
+                },
+                PendingRequest::Store { recipient: r, sent_at: t } => {
+                    // if STORE times out, evict recipient
+                    if t.elapsed() > REQ_TIMEOUT {
+                        self.routing_table.evict(*r);
                         remove_nonces.push(*req.0);
                     }
                 }

@@ -18,6 +18,7 @@ pub struct NodeLookup {
     pub queried: HashSet<Id>, // all nodes we've sent a message to
     pub pending: HashSet<Id>, // all nodes we've sent a message to and are waiting for a response on
     pub last_round_at: Instant,
+    pub closest_without_value: Option<Contact>, // closest node that did not return the value
 }
 
 impl NodeLookup {
@@ -34,7 +35,8 @@ impl NodeLookup {
             shortlist: init_contacts, 
             queried: HashSet::new(), 
             pending: HashSet::new(),
-            last_round_at: Instant::now()
+            last_round_at: Instant::now(),
+            closest_without_value: None,
         }
     }
 }
