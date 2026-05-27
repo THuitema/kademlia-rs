@@ -49,6 +49,7 @@ pub struct KademliaNode {
     pub store: HashMap<Id, Vec<u8>>, // the DHT entries this node stores,
     pub active_stores: HashMap<Id, Vec<u8>>, // stores the key-value pairs node is currently storing across multiple nodes
     pub completed_stores: HashMap<Id, Vec<Contact>>, // list of contacts that stored the key-value pair
+    pub init_refresh_needed: bool, // for tracking when self-lookup completes in join() so we can perform bucket refreshes
 }
 
 impl KademliaNode {
@@ -81,6 +82,7 @@ impl KademliaNode {
             store: HashMap::new(),
             active_stores: HashMap::new(),
             completed_stores: HashMap::new(),
+            init_refresh_needed: true,
         })
     }
 
@@ -268,6 +270,19 @@ impl KademliaNode {
     }
 
     /**
+     * Join network given an existing node
+     * Should be first thing called after ::new() and ::listen()
+     * Adds join node to routing table
+     * Performs lookup on its own ID to learn other nodes
+     * Refreshes all unpopulated buckets after self-lookup completes
+     */
+    pub fn join(&mut self, join_addr: SocketAddr, join_id: Id) {
+        let join_contact = Contact { addr: join_addr, id: join_id };
+        self.routing_table.add(join_contact);
+        self.lookup(LookupType::FindNode, self.id);
+    }
+
+    /**
      * Store a key-value pair in the distributed hash table
      * key-value pair is replicated to the k-closest nodes to to the key
      * If key is None, it will be the SHA1 hash of the value
@@ -349,6 +364,7 @@ impl KademliaNode {
     fn check_active_lookups(&mut self) {
         let mut remove_lookups: Vec<Id> = Vec::new();
 
+        let mut init_refresh = false;
         let mut lookup_tasks: Vec<(Id, Contact, Id, LookupType)> = Vec::new(); // nonce, Contact, target, type
         let mut store_tasks: Vec<(Id, Vec<u8>, Vec<Contact>)> = Vec::new(); // key, value, shortlist
 
@@ -359,6 +375,12 @@ impl KademliaNode {
                 if lookup_state.closest_node.id == lookup_state.old_closest_node.id && lookup_state.pending.is_empty() {
                     self.completed_lookups.insert(*target, LookupResult::Contacts(lookup_state.shortlist.clone()));
                     remove_lookups.push(*target);
+
+                    // check if this was the initial self-lookup and now a full refresh is needed
+                    if *target == self.id && self.init_refresh_needed {
+                        self.init_refresh_needed = false;
+                        init_refresh = true;
+                    }
 
                     // check if this completed lookup is associated with a store
                     if let Some(value) = self.active_stores.remove(target) {
@@ -386,6 +408,11 @@ impl KademliaNode {
                     lookup_tasks.push((nonce, contact, *target, lookup_state.lookup_type));
                 }
             }
+        }
+
+        // check if we need to do init bucket refresh
+        if init_refresh {
+            self.init_refresh();
         }
 
         // send FIND_* messages
@@ -484,6 +511,9 @@ impl KademliaNode {
         }
     }
 
+    /**
+     * Sends StoreRequest to each contact for key-value pair
+     */
     fn send_stores(&mut self, contacts: Vec<Contact>, key: Id, value: Vec<u8>) {
         for c in contacts {
             let nonce = Id::generate_id();
@@ -497,5 +527,29 @@ impl KademliaNode {
                 Err(e) => eprintln!("[send_stores] failed to send STORE to {}: {:?}", c.addr, e)
             }
         }
+    }
+
+    /**
+     * Refreshes all unpopulated buckets in routing table
+     * Last step of join logic, done once self-lookup completes
+     */
+    fn init_refresh(&mut self) {
+        let mut refresh_tasks: Vec<usize> = Vec::new();
+        for (i, bucket) in self.routing_table.buckets.iter().enumerate() {
+            if bucket.contacts.is_empty() {
+                refresh_tasks.push(i);
+            }
+        }
+        for i in refresh_tasks {
+            self.refresh_bucket(i);
+        }
+    }
+
+    /**
+     * Performs FIND_NODE lookup on random ID in bucket range
+     */
+    fn refresh_bucket(&mut self, bucket_index: usize) {
+        let id = Id::generate_id_in_bucket(self.id, bucket_index);
+        self.lookup(LookupType::FindNode, id);
     }
 }

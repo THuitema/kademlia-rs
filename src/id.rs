@@ -36,6 +36,33 @@ impl Id {
         }
     }
 
+    // first bucket_index bits match node_id
+    // next bit is opposite of node_id (this is what places id in the right bucket)
+    // rest of bits are random
+    pub fn generate_id_in_bucket(node_id: Id, bucket_index: usize) -> Self {
+        // bucket index = number of leading zeros
+        let mut id = node_id.id;
+
+        let mut byte = bucket_index / 8;
+        let mut bit = bucket_index % 8;
+        id[byte] ^= 1 << (7 - bit); // flip node_id bit
+
+        // randomize rest of bits
+        let mut rng = rand::thread_rng();
+        for i in (bucket_index + 1)..160 {
+            byte = i / 8;
+            bit = i % 8;
+
+            if rng.gen::<bool>() {
+                id[byte] |= 1 << (7 - bit); // set bit to 1
+            } else {
+                id[byte] &= !(1 << (7 - bit)); // set bit to 0
+            }
+        }
+
+        Self { id }
+    }
+
     // calculates SHA1 hash of value
     pub fn hash_value(value: Vec<u8>) -> Self {
         let mut hasher = Sha1::new();
