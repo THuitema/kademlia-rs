@@ -14,7 +14,8 @@ const K_DEFAULT: usize = 20;
 const RECV_TIMEOUT: Duration = Duration::from_secs(1); // so recv in listen loop blocks for a max of 1 sec
 const REQ_TIMEOUT: Duration = Duration::from_secs(10); // timeout on pending requests
 const ALPHA: usize = 3;
-const LOOKUP_ROUND_PERIOD: Duration = Duration::from_millis(500);
+const LOOKUP_ROUND_INTERVAL: Duration = Duration::from_millis(500);
+const BUCKET_REFRESH_INTERVAL: Duration = Duration::from_hours(1);
 
 /**
  * Used to keep track of sent requests that the node is expecting a response for
@@ -94,6 +95,7 @@ impl KademliaNode {
         loop {
             self.check_pending_requests();
             self.check_active_lookups();
+            self.check_bucket_refresh();
 
             let mut buffer = [0u8; MAX_PACKET_SIZE];
             let (num_bytes, src_addr) = match self.socket.recv_from(&mut buffer) {
@@ -370,7 +372,7 @@ impl KademliaNode {
 
         for (target, lookup_state) in self.active_lookups.iter_mut() {
             // Check if current round is over
-            if lookup_state.last_round_at.elapsed() > LOOKUP_ROUND_PERIOD {
+            if lookup_state.last_round_at.elapsed() > LOOKUP_ROUND_INTERVAL {
                 // check if termination condition hit
                 if lookup_state.closest_node.id == lookup_state.old_closest_node.id && lookup_state.pending.is_empty() {
                     self.completed_lookups.insert(*target, LookupResult::Contacts(lookup_state.shortlist.clone()));
@@ -546,10 +548,26 @@ impl KademliaNode {
     }
 
     /**
+     * Refreshes buckets which were last refreshed over one hour ago
+     */
+    fn check_bucket_refresh(&mut self) {
+        let mut refresh_tasks: Vec<usize> = Vec::new();
+        for (i, bucket) in self.routing_table.buckets.iter().enumerate() {
+            if bucket.last_update.elapsed() > BUCKET_REFRESH_INTERVAL {
+                refresh_tasks.push(i);
+            }
+        }
+        for i in refresh_tasks {
+            self.refresh_bucket(i);
+        }
+    }
+
+    /**
      * Performs FIND_NODE lookup on random ID in bucket range
      */
     fn refresh_bucket(&mut self, bucket_index: usize) {
         let id = Id::generate_id_in_bucket(self.id, bucket_index);
         self.lookup(LookupType::FindNode, id);
+        self.routing_table.buckets[bucket_index].last_update = Instant::now();
     }
 }

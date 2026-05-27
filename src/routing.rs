@@ -1,3 +1,4 @@
+use std::time::Instant;
 use crate::contact::Contact;
 use crate::id::Id;
 
@@ -11,6 +12,7 @@ pub enum AddContactResult {
 // Similar to an LRU cache
 pub struct KBucket {
     pub contacts: Vec<Contact>,
+    pub last_update: Instant,
 }
 
 // Stores 160 KBuckets
@@ -23,7 +25,10 @@ pub struct RoutingTable {
 
 impl KBucket {
     pub fn new() -> Self {
-        KBucket { contacts: Vec::new() }
+        KBucket { 
+            contacts: Vec::new(),
+            last_update: Instant::now(),
+        }
     }
 }
 
@@ -52,12 +57,14 @@ impl RoutingTable {
         if let Some(pos) = bucket.contacts.iter().position(|c| c.id == contact.id) {
             bucket.contacts.remove(pos);
             bucket.contacts.push(contact);
+            bucket.last_update = Instant::now();
             return AddContactResult::Updated;
         }
 
         // Add if bucket not full
         if bucket.contacts.len() < self.k {
             bucket.contacts.push(contact);
+            bucket.last_update = Instant::now();
             return AddContactResult::Added
         }
 
@@ -74,6 +81,7 @@ impl RoutingTable {
         let index = self.get_bucket_index(contact.id);
         let bucket = &mut self.buckets[index];
         bucket.contacts.remove(0);
+        bucket.last_update = Instant::now();
     }
 
     // removes contact from bucket, if it exists
@@ -82,6 +90,7 @@ impl RoutingTable {
         let bucket = &mut self.buckets[index];
         if let Some(pos) = bucket.contacts.iter().position(|c| c.id == contact.id) {
             bucket.contacts.remove(pos);
+            bucket.last_update = Instant::now();
         }
     }
 
@@ -90,6 +99,7 @@ impl RoutingTable {
         let index = self.get_bucket_index(contact.id);
         let bucket = &mut self.buckets[index];
         bucket.contacts.push(contact);
+        bucket.last_update = Instant::now();
     }
 
     // Returns n-closest contacts to target
