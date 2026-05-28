@@ -39,7 +39,8 @@ pub struct PingResponse {
 pub struct StoreRequest {
     pub header: Header,
     pub key: Id,
-    pub value: Vec<u8>
+    pub value: Vec<u8>,
+    pub original_publish_time: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -84,7 +85,7 @@ pub struct FindValueResponse {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum LookupResult {
     Contacts(Vec<Contact>),
-    Value(Vec<u8>)
+    Value(Vec<u8>, i64), // value, UNIX original publication time
 }
 
 impl Packet {
