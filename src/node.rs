@@ -17,6 +17,8 @@ const REQ_TIMEOUT: Duration = Duration::from_secs(10); // timeout on pending req
 const ALPHA: usize = 3;
 const LOOKUP_ROUND_INTERVAL: Duration = Duration::from_millis(500);
 const BUCKET_REFRESH_INTERVAL: Duration = Duration::from_hours(1);
+const ORIGINAL_REPUBLISH_INTERVAL: i64 = 86400;
+const REPLICA_REPUBLISH_INTERVAL: Duration = Duration::from_hours(1);
 
 /**
  * Used to keep track of sent requests that the node is expecting a response for
@@ -108,6 +110,7 @@ impl KademliaNode {
     pub fn listen(&mut self) {
         loop {
             self.check_expiration();
+            self.check_republish();
             self.check_pending_requests();
             self.check_active_lookups();
             self.check_bucket_refresh();
@@ -607,4 +610,42 @@ impl KademliaNode {
         let now = Utc::now().timestamp();
         self.store.retain(|_, entry| now - entry.original_publish_time < entry.expiration.as_secs() as i64);
     }
+
+    /**
+     * Republish replicas every hour, resetting last_republish_time
+     * Republish originals every 24 hours, resetting both last_republish_time and original_publish_time
+     * Same mechanics as store(): perform FIND_NODE to get closest nodes, then send STORE to each
+     */
+    fn check_republish(&mut self) {
+        let mut republish_tasks: Vec<(Id, ActiveStoreEntry)> = Vec::new();
+        let now_i64 = Utc::now().timestamp();
+        let now_instant = Instant::now();
+
+        for (key, entry) in self.store.iter_mut() {
+            if entry.is_original_publisher && now_i64 - entry.original_publish_time > ORIGINAL_REPUBLISH_INTERVAL {
+                // if original: reset original republish time AND last republish time
+                entry.original_publish_time = now_i64;
+                republish_tasks.push((*key, ActiveStoreEntry { 
+                    value: entry.value.clone(), 
+                    original_publish_time: entry.original_publish_time
+                }));
+                entry.last_republish_time = now_instant;
+            }
+            else if !entry.is_original_publisher && entry.last_republish_time.elapsed() > REPLICA_REPUBLISH_INTERVAL {
+                // if replica: reset last republish time
+                republish_tasks.push((*key, ActiveStoreEntry {
+                    value: entry.value.clone(),
+                    original_publish_time: entry.original_publish_time
+                }));
+                entry.last_republish_time = now_instant;
+            }
+        }
+
+        for (key, entry) in republish_tasks {
+            self.active_stores.insert(key, entry);
+            self.lookup(LookupType::FindNode, key);
+        }
+    }
+
+    // TODO: implement exponential inverse timeout calculation instead of hardcoded 24 hrs 
 }
