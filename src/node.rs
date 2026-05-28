@@ -107,6 +107,7 @@ impl KademliaNode {
      */
     pub fn listen(&mut self) {
         loop {
+            self.check_expiration();
             self.check_pending_requests();
             self.check_active_lookups();
             self.check_bucket_refresh();
@@ -597,5 +598,13 @@ impl KademliaNode {
         let id = Id::generate_id_in_bucket(self.id, bucket_index);
         self.lookup(LookupType::FindNode, id);
         self.routing_table.buckets[bucket_index].last_update = Instant::now();
+    }
+
+    /**
+     * Removes stored values that are expired according to their original publication time
+     */
+    fn check_expiration(&mut self) {
+        let now = Utc::now().timestamp();
+        self.store.retain(|_, entry| now - entry.original_publish_time < entry.expiration.as_secs() as i64);
     }
 }
