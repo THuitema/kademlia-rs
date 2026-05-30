@@ -83,3 +83,67 @@ impl fmt::Display for Id {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dist_self_is_zero() {
+        let id = Id::generate_id();
+        let dist = id.distance(id);
+        assert_eq!(dist.id, [0u8; 20]);
+    }
+
+    #[test]
+    fn test_dist_symmetry() {
+        let id1 = Id::generate_id();
+        let id2 = Id::generate_id();
+        assert_eq!(id1.distance(id2), id2.distance(id1));
+    }
+
+    #[test]
+    fn test_dist_triangle_inequality() {
+        let a = Id::generate_id();
+        let b = Id::generate_id();
+        let c = Id::generate_id();
+        assert!(a.distance(c) <= a.distance(b).distance(b.distance(c)));
+    }
+
+    #[test]
+    fn test_leading_zeros_all_zero() {
+        let id = Id { id: [0u8; 20] };
+        assert_eq!(id.leading_zeros(), 160);
+    }
+
+    #[test]
+    fn test_leading_zeros_all_one() {
+        let id = Id { id: [0xFF; 20] };
+        assert_eq!(id.leading_zeros(), 0);
+    }
+
+    #[test]
+    fn test_leading_zeros_known() {
+        let mut id = Id { id: [0u8; 20] };
+        id.id[1] = 0b00001000; // 4 leading zeros in second byte
+        assert_eq!(id.leading_zeros(), 12);
+    }
+
+    #[test]
+    fn test_generate_id_in_bucket() {
+        let node_id = Id::generate_id();
+        for i in 0..160 {
+            let id = Id::generate_id_in_bucket(node_id, i);
+            let dist = node_id.distance(id);
+            assert_eq!(dist.leading_zeros() as usize, i);
+        }
+    }
+
+    #[test]
+    fn test_hash_value_deterministic() {
+        let value = b"Hello World!".to_vec();
+        let hash1 = Id::hash_value(value.clone());
+        let hash2 = Id::hash_value(value);
+        assert_eq!(hash1, hash2);
+    }
+}
