@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use serde_cbor::to_vec;
 use std::fmt;
 use crate::node::{KademliaNode, ValueEntry};
@@ -186,7 +186,7 @@ pub fn handle_store(node: &mut KademliaNode, src_addr: SocketAddr, request: Stor
             is_original_publisher: false,
             original_publish_time: request.original_publish_time,
             last_republish_time: Instant::now(),
-            expiration: Duration::from_hours(24)
+            expiration: node.calculate_expiration(request.key)
         }
     );
 

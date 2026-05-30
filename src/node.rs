@@ -322,7 +322,7 @@ impl KademliaNode {
             is_original_publisher: true, 
             original_publish_time: publish_time, 
             last_republish_time: Instant::now(), 
-            expiration: Duration::from_hours(24),
+            expiration: self.calculate_expiration(key),
         });
 
         self.active_stores.insert(
@@ -647,5 +647,34 @@ impl KademliaNode {
         }
     }
 
-    // TODO: implement exponential inverse timeout calculation instead of hardcoded 24 hrs 
+    /**
+     * Calculates expiration of a key-value pair stored by the node
+     * Value is exponentially inversely proportional to the number of nodes between the current node and the node closest to the key
+     * Minimum expiration value is 24 hours, and increases exponentially the less nodes there are between current node and key
+     */
+    pub fn calculate_expiration(&self, key: Id) -> Duration {
+        let j = self.routing_table.get_bucket_index(key);
+
+        let mut ca = 0;
+        for i in 0..j {
+            ca += self.routing_table.buckets.get(i).unwrap().contacts.len();
+        }
+
+        let mut cb = 0;
+        for contact in self.routing_table.buckets.get(j).unwrap().contacts.iter() {
+            if contact.id.distance(key) < self.id.distance(key) {
+                cb += 1;
+            }
+        }
+
+        let c = ca + cb;
+        if c > self.k || c == 0 {
+            return Duration::from_hours(24);
+        } else {
+            let mut hours: f64 = 24.0;
+            hours = hours.powf(self.k as f64 / c as f64);
+            let seconds = (hours * 3600.0) as u64;
+            return Duration::from_secs(seconds);
+        }
+    }
 }
