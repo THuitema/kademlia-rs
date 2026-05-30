@@ -188,8 +188,8 @@ impl KademliaNode {
                             }
 
                             // update closest_node
-                            if contact.id.distance(res.target) < lookup_state.closest_node.id.distance(res.target) {
-                                lookup_state.closest_node = contact;
+                            if lookup_state.closest_node.is_none() || contact.id.distance(res.target) < lookup_state.closest_node.unwrap().id.distance(res.target) {
+                                lookup_state.closest_node = Some(contact);
                             }
 
                             // add to shortlist if not there
@@ -230,8 +230,8 @@ impl KademliaNode {
                                     }
 
                                     // update closest_node
-                                    if contact.id.distance(res.target) < lookup_state.closest_node.id.distance(res.target) {
-                                        lookup_state.closest_node = *contact;
+                                    if lookup_state.closest_node.is_none() || contact.id.distance(res.target) < lookup_state.closest_node.unwrap().id.distance(res.target) {
+                                        lookup_state.closest_node = Some(*contact);
                                     }
 
                                     // add to shortlist if not there
@@ -363,11 +363,16 @@ impl KademliaNode {
 
             match lookup_type {
                 LookupType::FindNode => {
-                    send_find_node(self, contact.addr, nonce, target).unwrap();
-                    self.pending_requests.insert(
-                        nonce, 
-                        PendingRequest::FindNode { target, recipient: contact, sent_at: Instant::now() }
-                    );
+                    match send_find_node(self, contact.addr, nonce, target) {
+                        Ok(()) => {
+                            self.pending_requests.insert(
+                                nonce, 
+                                PendingRequest::FindNode { target, recipient: contact, sent_at: Instant::now() }
+                            );
+                        },
+                        Err(e) => eprintln!("[lookup] failed to send: {:?}", e)
+                    }
+                    
                 },
                 LookupType::FindValue => {
                     send_find_value(self, contact.addr, nonce, target).unwrap();
@@ -406,7 +411,13 @@ impl KademliaNode {
             // Check if current round is over
             if lookup_state.last_round_at.elapsed() > LOOKUP_ROUND_INTERVAL {
                 // check if termination condition hit
-                if lookup_state.closest_node.id == lookup_state.old_closest_node.id && lookup_state.pending.is_empty() {
+                let no_improvement = match (lookup_state.closest_node, lookup_state.old_closest_node) {
+                    (Some(curr), Some(old)) => curr.id == old.id,
+                    (None, None) => true,
+                    _ => false
+                };
+
+                if no_improvement && lookup_state.pending.is_empty() {
                     self.completed_lookups.insert(*target, LookupResult::Contacts(lookup_state.shortlist.clone()));
                     remove_lookups.push(*target);
 
@@ -453,11 +464,15 @@ impl KademliaNode {
         for (nonce, recipient, target, lookup_type) in lookup_tasks {
             match lookup_type {
                 LookupType::FindNode => {
-                    send_find_node(self, recipient.addr, nonce, target).unwrap();
-                    self.pending_requests.insert(
-                        nonce,
-                        PendingRequest::FindNode { target, recipient, sent_at: Instant::now() }
-                    );
+                    match send_find_node(self, recipient.addr, nonce, target) {
+                        Ok(()) => {
+                            self.pending_requests.insert(
+                                nonce,
+                                PendingRequest::FindNode { target, recipient, sent_at: Instant::now() }
+                            );
+                        },
+                        Err(e) => eprintln!("[lookup] failed to send: {:?}", e)
+                    }
                 },
                 LookupType::FindValue => {
                     send_find_value(self, recipient.addr, nonce, target).unwrap();

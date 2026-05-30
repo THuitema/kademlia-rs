@@ -12,8 +12,8 @@ pub enum LookupType {
 pub struct NodeLookup {
     pub lookup_type: LookupType,
     pub target: Id,
-    pub closest_node: Contact,
-    pub old_closest_node: Contact,
+    pub closest_node: Option<Contact>,
+    pub old_closest_node: Option<Contact>,
     pub shortlist: Vec<Contact>,
     pub queried: HashSet<Id>, // all nodes we've sent a message to
     pub pending: HashSet<Id>, // all nodes we've sent a message to and are waiting for a response on
@@ -23,9 +23,9 @@ pub struct NodeLookup {
 
 impl NodeLookup {
     pub fn new(lookup_type: LookupType, target: Id, init_contacts: Vec<Contact>) -> Self {
-        let closest_node = *init_contacts.iter()
+        let closest_node = init_contacts.iter()
             .min_by_key(|c| c.id.distance(target))
-            .unwrap();
+            .copied();
 
         NodeLookup { 
             lookup_type,
