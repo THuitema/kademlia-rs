@@ -1,5 +1,4 @@
 use std::time::Instant;
-use std::net::SocketAddr;
 use crate::contact::Contact;
 use crate::id::Id;
 
@@ -123,9 +122,9 @@ impl RoutingTable {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::net::{IpAddr, Ipv4Addr};
-
-use super::*;
+    use std::net::SocketAddr;
 
     fn make_contact(id: Id) -> Contact {
         Contact {

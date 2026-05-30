@@ -693,3 +693,225 @@ impl KademliaNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    fn make_node() -> KademliaNode {
+        KademliaNode::new(
+            "127.0.0.1:0".parse().unwrap(),
+            None,
+            Some(20)
+        ).unwrap()
+    }
+
+    fn make_contact(id: Id, port: u16) -> Contact {
+        Contact {
+            id,
+            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port),
+        }
+    }
+
+    // calculate_expiration()
+
+    #[test]
+    fn test_calculate_expiration_c_zero() {
+        let node = make_node();
+        let key = Id::generate_id_in_bucket(node.id, 4);
+        let exp = node.calculate_expiration(key);
+        assert_eq!(exp, Duration::from_hours(24));
+    }
+
+    #[test]
+    fn test_calculate_expiration_c_greater_than_k() {
+        let mut node = make_node();
+        let key = Id::generate_id_in_bucket(node.id, 10);
+
+        // add 3 contacts in first 10 buckets, so c > k
+        for i in 0..10 {
+            let id1 = Id::generate_id_in_bucket(node.id, i);
+            let id2 = Id::generate_id_in_bucket(node.id, i);
+            let id3 = Id::generate_id_in_bucket(node.id, i);
+            node.routing_table.add(make_contact(id1, 9000 + i as u16));
+            node.routing_table.add(make_contact(id2, 10000 + i as u16));
+            node.routing_table.add(make_contact(id3, 11000 + i as u16));
+        }
+
+        let exp = node.calculate_expiration(key);
+        assert_eq!(exp, Duration::from_hours(24));
+    }
+
+    #[test]
+    fn test_calculate_expiration_c_equals_k() {
+        let mut node = make_node();
+        let k = node.k;
+        let key = Id::generate_id_in_bucket(node.id, 10);
+
+        // add exactly k contacts in buckets before 10, so c = k
+        for i in 0..k {
+            let id = Id::generate_id_in_bucket(node.id, i % 10);
+            node.routing_table.add(make_contact(id, 9000 + i as u16));
+        }
+
+        let exp = node.calculate_expiration(key);
+        assert_eq!(exp, Duration::from_hours(24));
+    }
+
+    #[test]
+    fn test_calculate_expiration_c_less_than_k() {
+        let mut node = make_node();
+        let key = Id::generate_id_in_bucket(node.id, 10);
+
+        // add 1 contact in bucket 0, so c = 1
+        let id = Id::generate_id_in_bucket(node.id, 0);
+        node.routing_table.add(make_contact(id, 9000));
+
+        let exp = node.calculate_expiration(key);
+        let expected_hours = 24.0_f64.powf(20.0 / 1.0);
+        let expected = Duration::from_secs((expected_hours * 3600.0) as u64);
+        assert_eq!(exp, expected);
+    }
+
+    // check_expiration()
+
+    #[test]
+    fn test_check_expiration_removes_expired() {
+        let mut node = make_node();
+        let key = Id::generate_id();
+
+        // insert entry that expired 1 second ago
+        node.store.insert(key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: false,
+            original_publish_time: Utc::now().timestamp() - 86401,
+            last_republish_time: Instant::now(),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_expiration();
+        assert!(!node.store.contains_key(&key));
+    }
+
+    #[test]
+    fn test_check_expiration_retains_fresh() {
+        let mut node = make_node();
+        let key = Id::generate_id();
+
+        // insert entry that published just now
+        node.store.insert(key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: false,
+            original_publish_time: Utc::now().timestamp(),
+            last_republish_time: Instant::now(),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_expiration();
+        assert!(node.store.contains_key(&key));
+    }
+
+    #[test]
+    fn test_check_expiration_mixed() {
+        let mut node = make_node();
+        let expired_key = Id::generate_id();
+        let fresh_key: Id = Id::generate_id();
+
+        // insert entry that expired 1 second ago
+        node.store.insert(expired_key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: false,
+            original_publish_time: Utc::now().timestamp() - 86401,
+            last_republish_time: Instant::now(),
+            expiration: Duration::from_secs(86400),
+        });
+
+        // insert entry that published just now
+        node.store.insert(fresh_key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: false,
+            original_publish_time: Utc::now().timestamp(),
+            last_republish_time: Instant::now(),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_expiration();
+        assert!(!node.store.contains_key(&expired_key));
+        assert!(node.store.contains_key(&fresh_key));
+    }
+
+    // check_republish()
+
+    #[test]
+    fn test_check_republish_replica_past_interval() {
+        let mut node = make_node();
+        let key = Id::generate_id();
+
+        node.store.insert(key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: false,
+            original_publish_time: Utc::now().timestamp() - 100,
+            last_republish_time: Instant::now() - REPLICA_REPUBLISH_INTERVAL - Duration::from_secs(1),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_republish();
+        assert!(node.active_stores.contains_key(&key));
+    }
+
+    #[test]
+    fn test_check_republish_replica_fresh() {
+        let mut node = make_node();
+        let key = Id::generate_id();
+
+        node.store.insert(key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: false,
+            original_publish_time: Utc::now().timestamp(),
+            last_republish_time: Instant::now(),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_republish();
+        assert!(!node.active_stores.contains_key(&key));
+    }
+
+    #[test]
+    fn test_check_republish_original_past_interval() {
+        let mut node = make_node();
+        let key = Id::generate_id();
+        let old_publish_time = Utc::now().timestamp() - ORIGINAL_REPUBLISH_INTERVAL - 1;
+
+        node.store.insert(key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: true,
+            original_publish_time: old_publish_time,
+            last_republish_time: Instant::now() - Duration::from_secs(ORIGINAL_REPUBLISH_INTERVAL as u64 + 1),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_republish();
+        assert!(node.active_stores.contains_key(&key));
+        // original_publish_time should be reset
+        assert!(node.store.get(&key).unwrap().original_publish_time > old_publish_time);
+    }
+
+    #[test]
+    fn test_check_republish_original_fresh() {
+        let mut node = make_node();
+        let key = Id::generate_id();
+
+        node.store.insert(key, ValueEntry {
+            value: b"hello".to_vec(),
+            is_original_publisher: true,
+            original_publish_time: Utc::now().timestamp(),
+            last_republish_time: Instant::now(),
+            expiration: Duration::from_secs(86400),
+        });
+
+        node.check_republish();
+        assert!(!node.active_stores.contains_key(&key));
+    }
+
+}
